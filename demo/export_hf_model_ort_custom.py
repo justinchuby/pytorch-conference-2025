@@ -1,8 +1,10 @@
-"""Script to export a Hugging Face text model to ONNX format using torch.onnx.export."""
+"""Script to export a Hugging Face text model to ONNX format with ONNX Runtime custom ops using torch.onnx.export."""
+
 from __future__ import annotations
 
 import os
 
+from onnxscript.rewriter.ort_fusions import optimize_for_ort
 import torch
 from transformers import AutoConfig, Gemma3ForCausalLM
 import transformers
@@ -175,17 +177,22 @@ onnx_program = torch.onnx.export(
     input_names=input_names,
     output_names=output_names,
     dynamic_shapes=dynamic_shapes,
-    opset_version=23,
+    opset_version=20,  # Set to 20 to support DynamicCache
     dynamo=True,
     # report=True,  # Uncomment to get a report of the export
 )
 
 print("✅ Export successful")
 
-os.makedirs(f"models/{MODEL_NAME}", exist_ok=True)
+print("Optimize the model with ONNX Runtime custom ops...")
+
+_, count = optimize_for_ort(onnx_program.model)
+print(f"Applied optimizations: {count}")
+
+os.makedirs(f"models/{MODEL_NAME}_ort", exist_ok=True)
 
 # Use the ONNXProgram.save method to save the model. Specifying external_data=True
 # will save the model weights in external files, which is required for models > 2GB
-onnx_program.save(f"models/{MODEL_NAME}/{MODEL_NAME}.onnx", external_data=True)
+onnx_program.save(f"models/{MODEL_NAME}_ort/{MODEL_NAME}.onnx", external_data=True)
 
-print(f"🧠 Model saved to models/{MODEL_NAME}/{MODEL_NAME}.onnx")
+print(f"🧠 Model saved to models/{MODEL_NAME}_ort/{MODEL_NAME}.onnx")
