@@ -2,7 +2,6 @@ import torch
 from transformers import AutoConfig, Gemma3ForCausalLM
 import transformers
 
-# MODEL_ID = "google/gemma-3-270m-it"
 MODEL_ID = "google/gemma-3-270m"
 # MODEL_ID = "google/gemma-3-1b-it"
 # MODEL_ID = "google/gemma-3-4b-it"
@@ -11,8 +10,8 @@ MODEL_ID = "google/gemma-3-270m"
 def get_hf_model(model_id: str):
     config = AutoConfig.from_pretrained(model_id, attn_implementation="sdpa")
     config.use_cache = True
+    # Use the correct AutoModel class for your model architecture
     model = Gemma3ForCausalLM.from_pretrained(model_id, config=config)
-    model = TextGenerationModelWrapper(model)
 
     return model, config
 
@@ -49,21 +48,13 @@ def create_text_gen_example_inputs(
         "input_ids",
         "attention_mask",
         "position_ids",
-        *[
-            f"past_key_values.{i}.key" for i in range(num_hidden_layers)
-        ],
-        *[
-            f"past_key_values.{i}.value" for i in range(num_hidden_layers)
-        ],
+        *[f"past_key_values.{i}.key" for i in range(num_hidden_layers)],
+        *[f"past_key_values.{i}.value" for i in range(num_hidden_layers)],
     ]
     output_names = [
         "logits",
-        *[
-            f"present.{i}.key" for i in range(num_hidden_layers)
-        ],
-        *[
-            f"present.{i}.value" for i in range(num_hidden_layers)
-        ],
+        *[f"present.{i}.key" for i in range(num_hidden_layers)],
+        *[f"present.{i}.value" for i in range(num_hidden_layers)],
     ]
 
     num_key_value_heads = config.num_key_value_heads
@@ -114,10 +105,23 @@ def make_dynamic_cache(
     return cache
 
 
+from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS
+from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+
+
 class TextGenerationModelWrapper(torch.nn.Module):
     def __init__(self, model: torch.nn.Module):
         super().__init__()
         self.model = model
+
+        # This is the same as sdpa, but mask creation does not use `vmap` which is not exportable
+        ALL_MASK_ATTENTION_FUNCTIONS.register(
+            "sdpa_without_vmap", sdpa_mask_without_vmap
+        )
+        ALL_ATTENTION_FUNCTIONS.register(
+            "sdpa_without_vmap", ALL_ATTENTION_FUNCTIONS["sdpa"]
+        )
+        self.model.model.config._attn_implementation = "sdpa_without_vmap"
 
     def forward(
         self,
@@ -137,6 +141,9 @@ class TextGenerationModelWrapper(torch.nn.Module):
 
 
 model, config = get_hf_model(MODEL_ID)
+# Wrap the model to adjust the forward method for ONNX export
+model = TextGenerationModelWrapper(model)
+# Obtain example inputs and dynamic axes
 example_kwargs, dynamic_shapes, input_names, output_names = (
     create_text_gen_example_inputs(config)
 )
@@ -145,30 +152,21 @@ example_kwargs, dynamic_shapes, input_names, output_names = (
 
 # ONNX Export
 # Disable fake tensor cache to avoid issues vmap
-with torch._dynamo.config.patch(fake_tensor_cache_enabled=False):
-    onnx_program = torch.onnx.export(
-        model,
-        (),
-        kwargs=example_kwargs,
-        input_names=input_names,
-        output_names=output_names,
-        dynamic_shapes=dynamic_shapes,
-        opset_version=23,
-        dynamo=True,
-        report=True,
-    )
+# with torch._dynamo.config.patch(fake_tensor_cache_enabled=False):
+onnx_program = torch.onnx.export(
+    model,
+    (),
+    kwargs=example_kwargs,
+    input_names=input_names,
+    output_names=output_names,
+    dynamic_shapes=dynamic_shapes,
+    opset_version=23,
+    dynamo=True,
+    # report=True,  # Uncomment to get a report of the export
+)
 
-print("export successful")
+print("✅ Export successful")
 
 onnx_program.save("gemma-3-270m.onnx", external_data=True)
 
-print("model saved")
-
-onnx_output = onnx_program(**example_kwargs)
-
-print(onnx_output)
-
-# print("------------")
-
-# output = model(**example_kwargs)
-# print(output)
+print("🧠 Model saved")
