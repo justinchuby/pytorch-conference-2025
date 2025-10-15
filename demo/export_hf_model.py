@@ -110,13 +110,13 @@ from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
 
 class TextGenerationModelWrapper(torch.nn.Module):
-    def __init__(self, model: torch.nn.Module):
+    def __init__(self, model: transformers.PreTrainedModel):
         super().__init__()
         self.model = model
 
         # This is the same as sdpa, but mask creation does not use `vmap` which is not exportable
         ALL_MASK_ATTENTION_FUNCTIONS.register(
-            "sdpa_without_vmap", sdpa_mask_without_vmap
+            "sdpa_without_vmap", transformers.integrations.executorch.sdpa_mask_without_vmap
         )
         ALL_ATTENTION_FUNCTIONS.register(
             "sdpa_without_vmap", ALL_ATTENTION_FUNCTIONS["sdpa"]
