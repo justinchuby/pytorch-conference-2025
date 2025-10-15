@@ -8,7 +8,7 @@ model_id = "google/gemma-3-270m"
 # Create tokenizer files if they don't exist
 model_dir = Path(__file__).parent.parent / model_path
 if not (model_dir / "tokenizer_config.json").exists():
-    print("Saving tokenizer...")
+    print("Downloading tokenizer...")
     from transformers import AutoTokenizer
 
     AutoTokenizer.from_pretrained(model_id).save_pretrained(model_dir)

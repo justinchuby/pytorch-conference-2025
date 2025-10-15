@@ -2,8 +2,8 @@ import torch
 from transformers import AutoConfig, Gemma3ForCausalLM
 import transformers
 
-MODEL_ID = "google/gemma-3-270m-it"
-# MODEL_ID = "google/gemma-3-1b-it"
+# MODEL_ID = "google/gemma-3-270m-it"
+MODEL_ID = "google/gemma-3-1b-it"
 # MODEL_ID = "google/gemma-3-4b-it"
 # MODEL_ID = "google/gemma-3-27b-it"
 
@@ -14,7 +14,7 @@ def get_hf_model(model_id: str):
     """Load a Hugging Face model and its config."""
     config = AutoConfig.from_pretrained(model_id, attn_implementation="sdpa")
     config.use_cache = True
-    # Use the correct AutoModel class for your model architecture
+    # MARK: Use the correct AutoModel class for your model architecture
     model = Gemma3ForCausalLM.from_pretrained(model_id, config=config)
 
     return model, config
@@ -179,6 +179,6 @@ print("✅ Export successful")
 
 # Use the ONNXProgram.save method to save the model. Specifying external_data=True
 # will save the model weights in external files, which is required for models > 2GB
-onnx_program.save("models/MODEL_NAME/MODEL_NAME.onnx", external_data=True)
+onnx_program.save(f"models/{MODEL_NAME}/{MODEL_NAME}.onnx", external_data=True)
 
-print("🧠 Model saved")
+print(f"🧠 Model saved to models/{MODEL_NAME}/{MODEL_NAME}.onnx")
