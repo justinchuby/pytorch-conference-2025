@@ -2,12 +2,16 @@ import torch
 from transformers import AutoConfig, Gemma3ForCausalLM
 import transformers
 
-MODEL_ID = "google/gemma-3-270m"
+MODEL_ID = "google/gemma-3-270m-it"
 # MODEL_ID = "google/gemma-3-1b-it"
 # MODEL_ID = "google/gemma-3-4b-it"
+# MODEL_ID = "google/gemma-3-27b-it"
+
+MODEL_NAME = MODEL_ID.split("/")[-1]
 
 
 def get_hf_model(model_id: str):
+    """Load a Hugging Face model and its config."""
     config = AutoConfig.from_pretrained(model_id, attn_implementation="sdpa")
     config.use_cache = True
     # Use the correct AutoModel class for your model architecture
@@ -98,6 +102,7 @@ def create_text_gen_example_inputs(
 def make_dynamic_cache(
     past_key_values: list[tuple[torch.Tensor, torch.Tensor]],
 ) -> transformers.cache_utils.DynamicCache:
+    """Create a DynamicCache from past_key_values."""
     cache = transformers.cache_utils.DynamicCache()
     for layer_idx in range(len(past_key_values)):
         key_states, value_states = past_key_values[layer_idx]
@@ -110,13 +115,16 @@ from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
 
 class TextGenerationModelWrapper(torch.nn.Module):
+    """A wrapper around a Hugging Face model to adjust the forward method for ONNX export."""
+
     def __init__(self, model: transformers.PreTrainedModel):
         super().__init__()
         self.model = model
 
         # This is the same as sdpa, but mask creation does not use `vmap` which is not exportable
         ALL_MASK_ATTENTION_FUNCTIONS.register(
-            "sdpa_without_vmap", transformers.integrations.executorch.sdpa_mask_without_vmap
+            "sdpa_without_vmap",
+            transformers.integrations.executorch.sdpa_mask_without_vmap,
         )
         ALL_ATTENTION_FUNCTIONS.register(
             "sdpa_without_vmap", ALL_ATTENTION_FUNCTIONS["sdpa"]
@@ -141,8 +149,10 @@ class TextGenerationModelWrapper(torch.nn.Module):
 
 
 model, config = get_hf_model(MODEL_ID)
+
 # Wrap the model to adjust the forward method for ONNX export
 model = TextGenerationModelWrapper(model)
+
 # Obtain example inputs and dynamic axes
 example_kwargs, dynamic_shapes, input_names, output_names = (
     create_text_gen_example_inputs(config)
@@ -167,6 +177,8 @@ onnx_program = torch.onnx.export(
 
 print("✅ Export successful")
 
-onnx_program.save("gemma-3-270m.onnx", external_data=True)
+# Use the ONNXProgram.save method to save the model. Specifying external_data=True
+# will save the model weights in external files, which is required for models > 2GB
+onnx_program.save("models/MODEL_NAME/MODEL_NAME.onnx", external_data=True)
 
 print("🧠 Model saved")
