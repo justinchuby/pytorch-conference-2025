@@ -23,6 +23,20 @@ MODEL_ID = "google/gemma-3-4b-it"
 MODEL_NAME = MODEL_ID.split("/")[-1]
 
 
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
+    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
+    """
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[:, :, None, :, :].expand(
+        batch, num_key_value_heads, n_rep, slen, head_dim
+    )
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+
+
 def sdpa_attention_forward_with_check(
     module: torch.nn.Module,
     query: torch.Tensor,
@@ -34,11 +48,14 @@ def sdpa_attention_forward_with_check(
     is_causal: bool | None = None,
     **kwargs,
 ) -> tuple[torch.Tensor, None]:
+    if hasattr(module, "num_key_value_groups"):
+        key = repeat_kv(key, module.num_key_value_groups)
+        value = repeat_kv(value, module.num_key_value_groups)
     if attention_mask is not None and attention_mask.ndim == 4:
         attention_mask = attention_mask[:, :, :, : key.shape[-2]]
         torch._check(
             attention_mask.shape[-1] == key.shape[-2],
-            lambda: "Attention mask shape is not compatible with key shape.",
+            lambda: "attention_mask.shape[-1] == key.shape[-2] should be true",
         )
 
     if is_causal is None:
@@ -56,7 +73,6 @@ def sdpa_attention_forward_with_check(
         dropout_p=dropout,
         scale=scaling,
         is_causal=is_causal,
-        enable_gqa=True,
     )
     attn_output = attn_output.transpose(1, 2).contiguous()
 
@@ -209,8 +225,6 @@ example_kwargs, dynamic_shapes, input_names, output_names = (
 )
 
 # ONNX Export
-# Disable fake tensor cache to avoid issues vmap
-# with torch._dynamo.config.patch(fake_tensor_cache_enabled=False):
 onnx_program = torch.onnx.export(
     model,
     (),
