@@ -1,4 +1,7 @@
-"""Script to export a Hugging Face text model to ONNX format with ONNX Runtime custom ops using torch.onnx.export."""
+"""Script to export a Hugging Face text model to ONNX format with ONNX Runtime custom ops using torch.onnx.export.
+
+Verified with transformers==4.55
+"""
 
 from __future__ import annotations
 
@@ -9,8 +12,8 @@ import torch
 from transformers import AutoConfig, Gemma3ForCausalLM
 import transformers
 
-# MODEL_ID = "google/gemma-3-270m-it"
-MODEL_ID = "google/gemma-3-1b-it"
+MODEL_ID = "google/gemma-3-270m-it"
+# MODEL_ID = "google/gemma-3-1b-it"
 # MODEL_ID = "google/gemma-3-4b-it"
 # MODEL_ID = "google/gemma-3-27b-it"
 
@@ -177,7 +180,7 @@ onnx_program = torch.onnx.export(
     input_names=input_names,
     output_names=output_names,
     dynamic_shapes=dynamic_shapes,
-    opset_version=20,  # Set to 20 to support DynamicCache
+    opset_version=20,  # Set to 20 for ORT fusion rules
     dynamo=True,
     # report=True,  # Uncomment to get a report of the export
 )

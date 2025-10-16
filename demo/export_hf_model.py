@@ -1,26 +1,85 @@
-"""Script to export a Hugging Face text model to ONNX format using torch.onnx.export."""
+"""Script to export a Hugging Face text model to ONNX format using torch.onnx.export.
+
+Verified with transformers==4.55
+"""
+
 from __future__ import annotations
 
 import os
 
 import torch
-from transformers import AutoConfig, Gemma3ForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM
 import transformers
 
+from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS
+from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+
+
 # MODEL_ID = "google/gemma-3-270m-it"
-MODEL_ID = "google/gemma-3-1b-it"
-# MODEL_ID = "google/gemma-3-4b-it"
+# MODEL_ID = "google/gemma-3-1b-it"
+MODEL_ID = "google/gemma-3-4b-it"
 # MODEL_ID = "google/gemma-3-27b-it"
 
 MODEL_NAME = MODEL_ID.split("/")[-1]
 
 
+def sdpa_attention_forward_with_check(
+    module: torch.nn.Module,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    dropout: float = 0.0,
+    scaling: float | None = None,
+    is_causal: bool | None = None,
+    **kwargs,
+) -> tuple[torch.Tensor, None]:
+    if attention_mask is not None and attention_mask.ndim == 4:
+        attention_mask = attention_mask[:, :, :, : key.shape[-2]]
+        torch._check(
+            attention_mask.shape[-1] == key.shape[-2],
+            lambda: "Attention mask shape is not compatible with key shape.",
+        )
+
+    if is_causal is None:
+        is_causal = (
+            query.shape[2] > 1
+            and attention_mask is None
+            and getattr(module, "is_causal", True)
+        )
+
+    attn_output = torch.nn.functional.scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=attention_mask,
+        dropout_p=dropout,
+        scale=scaling,
+        is_causal=is_causal,
+        enable_gqa=True,
+    )
+    attn_output = attn_output.transpose(1, 2).contiguous()
+
+    return attn_output, None
+
+
+# Patch the attention functions to use the custom SDPA without vmap
+# This is the same as sdpa, but mask creation does not use `vmap` which is not exportable
+ALL_MASK_ATTENTION_FUNCTIONS.register(
+    "sdpa_without_vmap",
+    transformers.integrations.executorch.sdpa_mask_without_vmap,
+)
+ALL_ATTENTION_FUNCTIONS.register("sdpa_without_vmap", sdpa_attention_forward_with_check)
+
+
 def get_hf_model(model_id: str):
     """Load a Hugging Face model and its config."""
-    config = AutoConfig.from_pretrained(model_id, attn_implementation="sdpa")
+    config = AutoConfig.from_pretrained(
+        model_id, attn_implementation="sdpa_without_vmap"
+    )
     config.use_cache = True
     # MARK: Use the correct AutoModel class for your model architecture
-    model = Gemma3ForCausalLM.from_pretrained(model_id, config=config)
+    model = AutoModelForCausalLM.from_pretrained(model_id, config=config)
 
     return model, config
 
@@ -115,26 +174,12 @@ def make_dynamic_cache(
     return cache
 
 
-from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS
-from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
-
-
 class TextGenerationModelWrapper(torch.nn.Module):
     """A wrapper around a Hugging Face model to adjust the forward method for ONNX export."""
 
     def __init__(self, model: transformers.PreTrainedModel):
         super().__init__()
         self.model = model
-
-        # This is the same as sdpa, but mask creation does not use `vmap` which is not exportable
-        ALL_MASK_ATTENTION_FUNCTIONS.register(
-            "sdpa_without_vmap",
-            transformers.integrations.executorch.sdpa_mask_without_vmap,
-        )
-        ALL_ATTENTION_FUNCTIONS.register(
-            "sdpa_without_vmap", ALL_ATTENTION_FUNCTIONS["sdpa"]
-        )
-        self.model.model.config._attn_implementation = "sdpa_without_vmap"
 
     def forward(
         self,
@@ -162,8 +207,6 @@ model = TextGenerationModelWrapper(model)
 example_kwargs, dynamic_shapes, input_names, output_names = (
     create_text_gen_example_inputs(config)
 )
-
-# transformers.integrations.executorch.register_dynamic_cache_export_support()
 
 # ONNX Export
 # Disable fake tensor cache to avoid issues vmap
