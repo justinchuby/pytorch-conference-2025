@@ -117,7 +117,7 @@ def create_text_gen_example_inputs(
         "input_ids": {0: batch, 1: sequence_len},
         "attention_mask": {
             0: batch,
-            1: "past_sequence_len+sequence_len",
+            1: "past_sequence_len + sequence_len",
         },
         "position_ids": {
             0: batch,
