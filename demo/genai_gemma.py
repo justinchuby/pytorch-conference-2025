@@ -2,8 +2,8 @@ from pathlib import Path
 
 import onnxruntime_genai as og
 
-model_name = "gemma-3-1b-it"
-model_path = f"models/{model_name}"
+model_name = "gemma-3-270m-it"
+model_path = f"models/{model_name}_ort"
 model_id = f"google/{model_name}"
 
 # Create tokenizer files if they don't exist

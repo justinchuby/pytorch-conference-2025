@@ -14,6 +14,8 @@ import transformers
 from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
+from onnxscript.rewriter.ort_fusions import optimize_for_ort
+
 
 MODEL_ID = "google/gemma-3-270m-it"
 # MODEL_ID = "google/gemma-3-1b-it"
