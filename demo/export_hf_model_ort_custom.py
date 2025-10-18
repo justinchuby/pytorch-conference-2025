@@ -126,21 +126,28 @@ def create_text_gen_example_inputs(
             1: sequence_len,
         },
         "past_key_values": [
-            [{0: batch, 2: "past_sequence_len"} for _ in range(num_hidden_layers)],
-            [{0: batch, 2: "past_sequence_len"} for _ in range(num_hidden_layers)],
+            ({0: batch, 2: "past_sequence_len"}, {0: batch, 2: "past_sequence_len"})
+            for _ in range(num_hidden_layers)
         ],
     }
+    past_key_values_names = []
+    for i in range(num_hidden_layers):
+        past_key_values_names.append(f"past_key_values.{i}.key")
+        past_key_values_names.append(f"past_key_values.{i}.value")
     input_names = [
         "input_ids",
         "attention_mask",
         "position_ids",
-        *[f"past_key_values.{i}.key" for i in range(num_hidden_layers)],
-        *[f"past_key_values.{i}.value" for i in range(num_hidden_layers)],
+        *past_key_values_names,
     ]
+
+    present_names = []
+    for i in range(num_hidden_layers):
+        present_names.append(f"present.{i}.key")
+        present_names.append(f"present.{i}.value")
     output_names = [
         "logits",
-        *[f"present.{i}.key" for i in range(num_hidden_layers)],
-        *[f"present.{i}.value" for i in range(num_hidden_layers)],
+        *present_names,
     ]
 
     num_key_value_heads = config.num_key_value_heads
@@ -157,28 +164,33 @@ def create_text_gen_example_inputs(
             past_seq_len + seq_len,
             dtype=torch.int64,
         ).expand((batch_size, -1)),
-        past_key_values=make_dynamic_cache(
-            [
-                (
-                    torch.randn(
-                        batch_size,
-                        num_key_value_heads,
-                        seq_len,
-                        head_dim,
-                    ),
-                    torch.randn(
-                        batch_size,
-                        num_key_value_heads,
-                        seq_len,
-                        head_dim,
-                    ),
-                )
-                for _ in range(num_hidden_layers)
-            ]
-        ),
+        past_key_values=[
+            (
+                torch.randn(
+                    batch_size,
+                    num_key_value_heads,
+                    seq_len,
+                    head_dim,
+                ),
+                torch.randn(
+                    batch_size,
+                    num_key_value_heads,
+                    seq_len,
+                    head_dim,
+                ),
+            )
+            for _ in range(num_hidden_layers)
+        ],
     )
 
     return example_inputs, dynamic_shapes, input_names, output_names
+
+
+def unpack_dynamic_cache(
+    dynamic_cache: transformers.cache_utils.DynamicCache,
+) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """Unpack a DynamicCache into past_key_values format."""
+    return [(layer.keys, layer.values) for layer in dynamic_cache.layers]
 
 
 def make_dynamic_cache(
@@ -210,10 +222,10 @@ class TextGenerationModelWrapper(torch.nn.Module):
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
-            past_key_values=past_key_values,
+            past_key_values=make_dynamic_cache(past_key_values),
             use_cache=True,
         )
-        return hf_output.logits, hf_output.past_key_values
+        return hf_output.logits, unpack_dynamic_cache(hf_output.past_key_values)
 
 
 model, config = get_hf_model(MODEL_ID)

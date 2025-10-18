@@ -128,17 +128,24 @@ def create_text_gen_example_inputs(
             [{0: batch, 2: "past_sequence_len"} for _ in range(num_hidden_layers)],
         ],
     }
+    past_key_values_names = []
+    for i in range(num_hidden_layers):
+        past_key_values_names.append(f"past_key_values.{i}.key")
+        past_key_values_names.append(f"past_key_values.{i}.value")
     input_names = [
         "input_ids",
         "attention_mask",
         "position_ids",
-        *[f"past_key_values.{i}.key" for i in range(num_hidden_layers)],
-        *[f"past_key_values.{i}.value" for i in range(num_hidden_layers)],
+        *past_key_values_names,
     ]
+
+    present_names = []
+    for i in range(num_hidden_layers):
+        present_names.append(f"present.{i}.key")
+        present_names.append(f"present.{i}.value")
     output_names = [
         "logits",
-        *[f"present.{i}.key" for i in range(num_hidden_layers)],
-        *[f"present.{i}.value" for i in range(num_hidden_layers)],
+        *present_names,
     ]
 
     num_key_value_heads = config.num_key_value_heads
@@ -179,6 +186,13 @@ def create_text_gen_example_inputs(
     return example_inputs, dynamic_shapes, input_names, output_names
 
 
+def unpack_dynamic_cache(
+    dynamic_cache: transformers.cache_utils.DynamicCache,
+) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """Unpack a DynamicCache into past_key_values format."""
+    return [(layer.keys, layer.values) for layer in dynamic_cache.layers]
+
+
 def make_dynamic_cache(
     past_key_values: list[tuple[torch.Tensor, torch.Tensor]],
 ) -> transformers.cache_utils.DynamicCache:
@@ -211,7 +225,7 @@ class TextGenerationModelWrapper(torch.nn.Module):
             past_key_values=past_key_values,
             use_cache=True,
         )
-        return hf_output.logits, hf_output.past_key_values
+        return hf_output.logits, unpack_dynamic_cache(hf_output.past_key_values)
 
 
 model, config = get_hf_model(MODEL_ID)
