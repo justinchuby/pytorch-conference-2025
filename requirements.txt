@@ -1,5 +1,5 @@
 torch==2.9.0
 transformers==4.55
-onnxscript==0.5.5
+onnxscript@git+https://github.com/microsoft/onnxscript.git
 onnxruntime==1.23.0
 onnxruntime-genai
