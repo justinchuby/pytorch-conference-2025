@@ -15,9 +15,9 @@ from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
 
-# MODEL_ID = "google/gemma-3-270m-it"
+MODEL_ID = "google/gemma-3-270m-it"
 # MODEL_ID = "google/gemma-3-1b-it"
-MODEL_ID = "google/gemma-3-4b-it"
+# MODEL_ID = "google/gemma-3-4b-it"
 # MODEL_ID = "google/gemma-3-27b-it"
 
 MODEL_NAME = MODEL_ID.split("/")[-1]
@@ -123,10 +123,12 @@ def create_text_gen_example_inputs(
             0: batch,
             1: sequence_len,
         },
-        "past_key_values": [
-            [{0: batch, 2: "past_sequence_len"} for _ in range(num_hidden_layers)],
-            [{0: batch, 2: "past_sequence_len"} for _ in range(num_hidden_layers)],
-        ],
+        # "past_key_values": [
+        #     [{0: batch, 2: "past_sequence_len"} for _ in range(num_hidden_layers)],
+        #     [{0: batch, 2: "past_sequence_len"} for _ in range(num_hidden_layers)],
+        # ],
+        "past_key_values":
+            [({0: batch, 2: "past_sequence_len"}, {0: batch, 2: "past_sequence_len"}) for _ in range(num_hidden_layers)],
     }
     input_names = [
         "input_ids",
@@ -155,25 +157,23 @@ def create_text_gen_example_inputs(
             past_seq_len + seq_len,
             dtype=torch.int64,
         ).expand((batch_size, -1)),
-        past_key_values=make_dynamic_cache(
-            [
-                (
-                    torch.randn(
-                        batch_size,
-                        num_key_value_heads,
-                        seq_len,
-                        head_dim,
-                    ),
-                    torch.randn(
-                        batch_size,
-                        num_key_value_heads,
-                        seq_len,
-                        head_dim,
-                    ),
-                )
-                for _ in range(num_hidden_layers)
-            ]
-        ),
+        past_key_values=[
+            (
+                torch.randn(
+                    batch_size,
+                    num_key_value_heads,
+                    seq_len,
+                    head_dim,
+                ),
+                torch.randn(
+                    batch_size,
+                    num_key_value_heads,
+                    seq_len,
+                    head_dim,
+                ),
+            )
+            for _ in range(num_hidden_layers)
+        ],
     )
 
     return example_inputs, dynamic_shapes, input_names, output_names
@@ -208,7 +208,7 @@ class TextGenerationModelWrapper(torch.nn.Module):
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
-            past_key_values=past_key_values,
+            past_key_values=make_dynamic_cache(past_key_values),
             use_cache=True,
         )
         return hf_output.logits, hf_output.past_key_values
@@ -243,6 +243,6 @@ os.makedirs(f"models/{MODEL_NAME}", exist_ok=True)
 
 # Use the ONNXProgram.save method to save the model. Specifying external_data=True
 # will save the model weights in external files, which is required for models > 2GB
-onnx_program.save(f"models/{MODEL_NAME}/{MODEL_NAME}.onnx", external_data=True)
+onnx_program.save(f"models/{MODEL_NAME}/{MODEL_NAME}2.onnx", external_data=True)
 
 print(f"🧠 Model saved to models/{MODEL_NAME}/{MODEL_NAME}.onnx")
