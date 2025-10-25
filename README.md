@@ -6,6 +6,7 @@ Material for presentation on What's new in torch.onnx
 
 - [Notebook](./demo.ipynb)
 - [Code](./demo)
+- [Slides](./torch_onnx_2025_slides.pdf)
 
 ## Links
 
